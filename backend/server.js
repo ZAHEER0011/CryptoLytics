@@ -141,5 +141,5 @@ app.get("/api/coins/:id/chart", async (req, res) => {
 
 
 app.listen(PORT, () => {
-  console.log(`Backend proxy running on http://localhost:${PORT}`);
+  console.log(`Backend proxy running on port ${PORT}`);
 });
