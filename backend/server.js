@@ -5,9 +5,11 @@ import NodeCache from "node-cache";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+axios.defaults.timeout = 10000;
+axios.defaults.headers.common['Accept'] = 'application/json';
 
 // Cache: 60 seconds TTL
-const cache = new NodeCache({ stdTTL: 60 });
+const cache = new NodeCache({ stdTTL: 300 }); // 5 minutes
 
 app.use(cors());
 
@@ -97,32 +99,61 @@ app.get("/api/coins/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const data = await fetchWithCache(
-      `coin_${id}`,
-      `${BASE_URL}/coins/${id}`,
-      {
-        localization: false,
-        tickers: false,
-        market_data: true,
-        community_data: false,
-        developer_data: false,
+    async function fetchWithCache(key, url, params, retries = 3) {
+      // return cache immediately if exists
+      const cached = cache.get(key);
+      if (cached) {
+        return cached;
       }
-    );
+
+      try {
+        const response = await axios.get(url, {
+          params,
+          timeout: 10000,
+        });
+
+        cache.set(key, response.data);
+        return response.data;
+
+      } catch (err) {
+
+        const status = err.response?.status;
+
+        console.error(`Fetch failed (${status}): ${url}`);
+
+        // if rate limited, retry with delay
+        if ((status === 429 || err.code === "ECONNRESET") && retries > 0) {
+          console.log("Retrying after delay...");
+
+          await new Promise(res => setTimeout(res, 1500));
+
+          return fetchWithCache(key, url, params, retries - 1);
+        }
+
+        // fallback to stale cache if exists
+        if (cached) {
+          console.log("Using stale cache fallback");
+          return cached;
+        }
+
+        throw err;
+      }
+    }
 
     res.json(data);
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: "Failed to fetch coin details" });
+    res.json(cache.get(`coin_${id}`) || {});
   }
 });
 
 app.get("/api/coins/:id/chart", async (req, res) => {
+  const { id } = req.params;
+  const { days = 7 } = req.query;
+
+  const cacheKey = `chart_${id}_${days}`;
+
   try {
-    const { id } = req.params;
-    const { days = 7 } = req.query;
-
-    const cacheKey = `chart_${id}_${days}`;
-
     const data = await fetchWithCache(
       cacheKey,
       `${BASE_URL}/coins/${id}/market_chart`,
@@ -133,9 +164,14 @@ app.get("/api/coins/:id/chart", async (req, res) => {
     );
 
     res.json(data);
+
   } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Failed to fetch chart data" });
+
+    console.error("Chart fetch failed:", err.message);
+
+    const cached = cache.get(cacheKey);
+
+    res.json(cached || { prices: [] });
   }
 });
 
