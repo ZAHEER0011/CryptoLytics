@@ -5,157 +5,153 @@ import NodeCache from "node-cache";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-axios.defaults.timeout = 10000;
-axios.defaults.headers.common['Accept'] = 'application/json';
-
-// Cache: 60 seconds TTL
-const cache = new NodeCache({ stdTTL: 300 }); // 5 minutes
 
 app.use(cors());
 
+axios.defaults.timeout = 10000;
+axios.defaults.headers.common["Accept"] = "application/json";
+
+const cache = new NodeCache({ stdTTL: 300 });
+
 const BASE_URL = "https://api.coingecko.com/api/v3";
 
-/**
- * Helper: fetch with cache
- */
-async function fetchWithCache(key, url, params) {
-  const cached = cache.get(key);
-  if (cached) {
-    return cached;
-  }
 
-  const response = await axios.get(url, { params });
-  cache.set(key, response.data);
-  return response.data;
+// SAFE FETCH WITH RETRY
+async function fetchWithCache(key, url, params, retries = 3) {
+
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  try {
+
+    const response = await axios.get(url, { params });
+
+    cache.set(key, response.data);
+
+    return response.data;
+
+  } catch (err) {
+
+    const status = err.response?.status;
+
+    console.log("Fetch error:", status, url);
+
+    if ((status === 429 || err.code === "ECONNRESET") && retries > 0) {
+
+      await new Promise(r => setTimeout(r, 1500));
+
+      return fetchWithCache(key, url, params, retries - 1);
+
+    }
+
+    if (cached) return cached;
+
+    throw err;
+  }
 }
 
-/**
- * Global Market Data
- */
+
+
+// GLOBAL
 app.get("/api/global", async (req, res) => {
+
   try {
+
     const data = await fetchWithCache(
       "global",
       `${BASE_URL}/global`,
       {}
     );
+
     res.json(data);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: "Failed to fetch global market data" });
+
+  } catch {
+
+    res.json({});
   }
+
 });
 
-/**
- * Coins Market Data (paginated)
- */
+
+
+// MARKETS
 app.get("/api/coins/markets", async (req, res) => {
+
   try {
+
     const {
       vs_currency = "inr",
       per_page = 10,
       page = 1,
     } = req.query;
 
-    const cacheKey = `markets_${vs_currency}_${per_page}_${page}`;
+    const key = `markets_${vs_currency}_${per_page}_${page}`;
 
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return res.json(cached);
-    }
-
-    const response = await axios.get(
+    const data = await fetchWithCache(
+      key,
       `${BASE_URL}/coins/markets`,
       {
-        params: {
-          vs_currency,
-          order: "market_cap_desc",
-          per_page,
-          page,
-          sparkline: false,
-          price_change_percentage: "24h,7d",
-        },
-        timeout: 8000, // IMPORTANT
+        vs_currency,
+        order: "market_cap_desc",
+        per_page,
+        page,
+        sparkline: false,
       }
     );
 
-    // CoinGecko sometimes returns non-array garbage
-    if (!Array.isArray(response.data)) {
-      console.error("Invalid CoinGecko response");
-      return res.json([]);
-    }
+    res.json(Array.isArray(data) ? data : []);
 
-    cache.set(cacheKey, response.data);
-    res.json(response.data);
-  } catch (err) {
-    console.error("Market fetch failed:", err.message);
+  } catch {
 
-    // 🔑 NEVER return 500 for pagination
     res.json([]);
   }
+
 });
 
+
+
+// COIN DETAILS  ✅ FIXED
 app.get("/api/coins/:id", async (req, res) => {
+
   try {
+
     const { id } = req.params;
 
-    async function fetchWithCache(key, url, params, retries = 3) {
-      // return cache immediately if exists
-      const cached = cache.get(key);
-      if (cached) {
-        return cached;
+    const key = `coin_${id}`;
+
+    const data = await fetchWithCache(
+      key,
+      `${BASE_URL}/coins/${id}`,
+      {
+        localization: false,
+        tickers: false,
+        market_data: true,
       }
+    );
 
-      try {
-        const response = await axios.get(url, {
-          params,
-          timeout: 10000,
-        });
+    res.json(data || {});
 
-        cache.set(key, response.data);
-        return response.data;
+  } catch {
 
-      } catch (err) {
-
-        const status = err.response?.status;
-
-        console.error(`Fetch failed (${status}): ${url}`);
-
-        // if rate limited, retry with delay
-        if ((status === 429 || err.code === "ECONNRESET") && retries > 0) {
-          console.log("Retrying after delay...");
-
-          await new Promise(res => setTimeout(res, 1500));
-
-          return fetchWithCache(key, url, params, retries - 1);
-        }
-
-        // fallback to stale cache if exists
-        if (cached) {
-          console.log("Using stale cache fallback");
-          return cached;
-        }
-
-        throw err;
-      }
-    }
-
-    res.json(data);
-  } catch (err) {
-    console.error(err.message);
-    res.json(cache.get(`coin_${id}`) || {});
+    res.json({});
   }
+
 });
 
-app.get("/api/coins/:id/chart", async (req, res) => {
-  const { id } = req.params;
-  const { days = 7 } = req.query;
 
-  const cacheKey = `chart_${id}_${days}`;
+
+// CHART ✅ FIXED
+app.get("/api/coins/:id/chart", async (req, res) => {
 
   try {
+
+    const { id } = req.params;
+    const { days = 7 } = req.query;
+
+    const key = `chart_${id}_${days}`;
+
     const data = await fetchWithCache(
-      cacheKey,
+      key,
       `${BASE_URL}/coins/${id}/market_chart`,
       {
         vs_currency: "inr",
@@ -163,19 +159,17 @@ app.get("/api/coins/:id/chart", async (req, res) => {
       }
     );
 
-    res.json(data);
+    res.json(data || { prices: [] });
 
-  } catch (err) {
+  } catch {
 
-    console.error("Chart fetch failed:", err.message);
-
-    const cached = cache.get(cacheKey);
-
-    res.json(cached || { prices: [] });
+    res.json({ prices: [] });
   }
+
 });
 
 
+
 app.listen(PORT, () => {
-  console.log(`Backend proxy running on port ${PORT}`);
+  console.log("Server running on port", PORT);
 });
