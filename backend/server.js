@@ -13,7 +13,9 @@ axios.defaults.headers.common["Accept"] = "application/json";
 
 const cache = new NodeCache({ stdTTL: 300 });
 
-const BASE_URL = "https://api.coingecko.com/api/v3";
+const VITE_API_KEY=import.meta.env.VITE_API_KEY;
+const BASE_URL = `https://api.coingecko.com/api/v3/ping?x_cg_demo_api_key=${VITE_API_KEY}`;
+console.log(BASE_URL)
 
 
 // SAFE FETCH WITH RETRY

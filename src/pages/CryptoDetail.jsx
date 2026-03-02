@@ -76,7 +76,7 @@ function CryptoDetail() {
   //   );
   // }
 
-  if (!coin) {
+  if (!coin || !coin.market_data) {
     return (
       <div className="min-h-screen bg-[var(--color-bg-dark)] flex justify-center items-center">
         <div className="flex flex-col items-center gap-3 text-white">
@@ -94,13 +94,23 @@ function CryptoDetail() {
       <div className="w-11/12 mx-auto mt-10 space-y-8">
         {/* Header */}
         <div className="flex items-center gap-4">
-          <img src={coin.image.large} alt={coin.name} className="w-12 h-12" />
+          {/* <img src={coin.image.large} alt={coin.name} className="w-12 h-12" /> */}
+          <img
+            src={coin?.image?.large || "/placeholder.png"}
+            alt={coin?.name || "coin"}
+            className="w-12 h-12"
+          />
           <div>
             <h1 className="text-3xl font-bold">
               {coin.name} ({coin.symbol.toUpperCase()})
             </h1>
             <p className="text-xl mt-1">
-              ₹{coin.market_data.current_price.inr.toLocaleString()}
+              {/* ₹{coin.market_data.current_price.inr.toLocaleString()} */}
+              ₹{
+                coin?.market_data?.current_price?.inr
+                  ? coin.market_data.current_price.inr.toLocaleString()
+                  : "N/A"
+              }
             </p>
           </div>
         </div>
@@ -158,8 +168,8 @@ function CryptoDetail() {
                 key={d}
                 onClick={() => setDays(d)}
                 className={`px-3 py-1 rounded ${days === d
-                    ? "bg-white text-black"
-                    : "bg-white/10 text-white"
+                  ? "bg-white text-black"
+                  : "bg-white/10 text-white"
                   }`}
               >
                 {d === 1 ? "24H" : `${d}D`}
